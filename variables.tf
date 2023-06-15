@@ -21,6 +21,12 @@ variable "volume_id" {
   type        = string
 }
 
+variable "data_volume_id" {
+  description = "Id for an optional separate disk volume to attach to the vm on dhcp's lease path"
+  type        = string
+  default     = ""
+}
+
 variable "libvirt_networks" {
   description = "Parameters of libvirt network connections if a libvirt networks are used."
   type = list(object({
@@ -187,10 +193,14 @@ variable "dhcp" {
       range_end   = string
     }))
     interfaces = list(string)
+    default_lease_time = number
+    max_lease_time = number
   })
   default = {
     networks = []
     interfaces = []
+    default_lease_time = 0
+    max_lease_time = 0
   }
 }
 

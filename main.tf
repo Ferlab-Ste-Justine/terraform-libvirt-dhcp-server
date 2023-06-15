@@ -18,10 +18,11 @@ locals {
       hostname = null
     }]
   )
+  volumes = var.data_volume_id != "" ? [var.volume_id, var.data_volume_id] : [var.volume_id]
 }
 
 module "network_configs" {
-  source = "git::https://github.com/Ferlab-Ste-Justine/terraform-cloudinit-templates.git//network?ref=v0.9.0"
+  source = "git::https://github.com/Ferlab-Ste-Justine/terraform-cloudinit-templates.git//network?ref=v0.10.0"
   network_interfaces = concat(
     [for idx, libvirt_network in var.libvirt_networks: {
       ip = libvirt_network.ip
@@ -43,22 +44,24 @@ module "network_configs" {
 }
 
 module "dhcp_configs" {
-  source = "git::https://github.com/Ferlab-Ste-Justine/terraform-cloudinit-templates.git//dhcp?ref=v0.9.0"
+  source = "git::https://github.com/Ferlab-Ste-Justine/terraform-cloudinit-templates.git//dhcp?ref=v0.10.0"
   dhcp = {
     interfaces = var.dhcp.interfaces
     networks = var.dhcp.networks
+    default_lease_time = var.dhcp.default_lease_time
+    max_lease_time = var.dhcp.max_lease_time
   }
   pxe = var.pxe
   install_dependencies = var.install_dependencies
 }
 
 module "prometheus_node_exporter_configs" {
-  source = "git::https://github.com/Ferlab-Ste-Justine/terraform-cloudinit-templates.git//prometheus-node-exporter?ref=v0.9.0"
+  source = "git::https://github.com/Ferlab-Ste-Justine/terraform-cloudinit-templates.git//prometheus-node-exporter?ref=v0.10.0"
   install_dependencies = var.install_dependencies
 }
 
 module "chrony_configs" {
-  source = "git::https://github.com/Ferlab-Ste-Justine/terraform-cloudinit-templates.git//chrony?ref=v0.9.0"
+  source = "git::https://github.com/Ferlab-Ste-Justine/terraform-cloudinit-templates.git//chrony?ref=v0.10.0"
   install_dependencies = var.install_dependencies
   chrony = {
     servers  = var.chrony.servers
@@ -68,7 +71,7 @@ module "chrony_configs" {
 }
 
 module "etcd_sync_configs" {
-  source = "git::https://github.com/Ferlab-Ste-Justine/terraform-cloudinit-templates.git//configurations-auto-updater?ref=v0.9.0"
+  source = "git::https://github.com/Ferlab-Ste-Justine/terraform-cloudinit-templates.git//configurations-auto-updater?ref=v0.10.0"
   install_dependencies = var.install_dependencies
   filesystem = {
     path = replace(join("/", ["/var/www/html", var.etcd_sync.url_path]), "////", "/")
@@ -92,7 +95,7 @@ module "etcd_sync_configs" {
 }
 
 module "s3_sync_configs" {
-  source = "git::https://github.com/Ferlab-Ste-Justine/terraform-cloudinit-templates.git//s3-syncs?ref=v0.9.0"
+  source = "git::https://github.com/Ferlab-Ste-Justine/terraform-cloudinit-templates.git//s3-syncs?ref=v0.10.0"
   install_dependencies = var.install_dependencies
   object_store = {
     url                    = var.s3_sync.s3.url
@@ -115,7 +118,7 @@ module "s3_sync_configs" {
 }
 
 module "fluentbit_configs" {
-  source = "git::https://github.com/Ferlab-Ste-Justine/terraform-cloudinit-templates.git//fluent-bit?ref=v0.9.0"
+  source = "git::https://github.com/Ferlab-Ste-Justine/terraform-cloudinit-templates.git//fluent-bit?ref=v0.10.0"
   install_dependencies = var.install_dependencies
   fluentbit = {
     metrics = var.fluentbit.metrics
@@ -146,6 +149,17 @@ module "fluentbit_configs" {
     forward = var.fluentbit.forward
   }
   etcd    = var.fluentbit.etcd
+}
+
+module "data_volume_configs" {
+  source = "git::https://github.com/Ferlab-Ste-Justine/terraform-cloudinit-templates.git//data-volumes?ref=v0.10.0"
+  volumes = [{
+    label         = "dhcp_data"
+    device        = "vdb"
+    filesystem    = "ext4"
+    mount_path    = "/var/lib/dhcp"
+    mount_options = "defaults"
+  }]
 }
 
 locals {
@@ -193,6 +207,11 @@ locals {
       filename     = "s3_sync.cfg"
       content_type = "text/cloud-config"
       content      = module.s3_sync_configs.configuration
+    }]: [],
+    var.data_volume_id != "" ? [{
+      filename     = "data_volume.cfg"
+      content_type = "text/cloud-config"
+      content      = module.data_volume_configs.configuration
     }]: []
   )
 }
@@ -227,8 +246,11 @@ resource "libvirt_domain" "dhcp" {
   vcpu = var.vcpus
   memory = var.memory
 
-  disk {
-    volume_id = var.volume_id
+  dynamic "disk" {
+    for_each = local.volumes
+    content {
+      volume_id = disk.value
+    }
   }
 
   dynamic "network_interface" {
